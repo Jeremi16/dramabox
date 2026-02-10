@@ -1,0 +1,13 @@
+name = "dramabox-cache-worker"
+main = "src/index.js"
+compatibility_date = "2026-02-10"
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5174,https://your-frontend-domain.com"
+CACHE_WRITE_TOKEN = "asd123jk"
+WRITE_RATE_LIMIT_PER_MINUTE = "120"
+
+[[kv_namespaces]]
+binding = "DRAMABOX_CACHE"
+id = "1c066ab2ba0148cebf7c47be5ffe3f40"
+preview_id = "c36831caac444c98bdd9640195339678"

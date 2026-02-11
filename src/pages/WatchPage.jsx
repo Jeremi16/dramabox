@@ -14,11 +14,73 @@ function estimateBitrate(height) {
 function findInternalSymbol(target, description) {
   let current = target;
   while (current) {
-    const match = Object.getOwnPropertySymbols(current).find((symbol) => symbol.description === description);
-    if (match) return match;
+    const directMatch = Object.getOwnPropertySymbols(current).find(
+      (symbol) => symbol.description === description,
+    );
+    if (directMatch) return directMatch;
     current = Object.getPrototypeOf(current);
   }
   return null;
+}
+
+function resolveQualityListSymbols(list) {
+  const level1 = Object.getPrototypeOf(list);
+  const level2 = level1 ? Object.getPrototypeOf(level1) : null;
+  const level3 = level2 ? Object.getPrototypeOf(level2) : null;
+
+  const selectByDescription = findInternalSymbol(list, "LIST_SELECT");
+  const addByDescription = findInternalSymbol(list, "LIST_ADD");
+  const resetByDescription = findInternalSymbol(list, "LIST_RESET");
+  const setReadonlyByDescription = findInternalSymbol(list, "LIST_SET_READONLY");
+  const setAutoByDescription = findInternalSymbol(list, "SET_AUTO_QUALITY");
+
+  const selectSymbol =
+    selectByDescription ||
+    Object.getOwnPropertySymbols(level2 || {}).find((symbol) => {
+      const fn = level2?.[symbol];
+      return typeof fn === "function" && fn.length === 3;
+    }) ||
+    null;
+
+  const resetSymbol =
+    resetByDescription ||
+    Object.getOwnPropertySymbols(level3 || {}).find((symbol) => {
+      const fn = level3?.[symbol];
+      return typeof fn === "function" && fn.length === 1;
+    }) ||
+    null;
+
+  const addSymbol =
+    addByDescription ||
+    Object.getOwnPropertySymbols(level3 || {}).find((symbol) => {
+      const fn = level3?.[symbol];
+      if (typeof fn !== "function" || fn.length !== 2) return false;
+      const source = String(fn);
+      return source.includes(".push(") || source.includes("push(");
+    }) ||
+    null;
+
+  const setReadonlySymbol =
+    setReadonlyByDescription ||
+    Object.getOwnPropertySymbols(level3 || {}).find((symbol) => {
+      const fn = level3?.[symbol];
+      if (typeof fn !== "function" || fn.length !== 2) return false;
+      const source = String(fn);
+      return source.includes("readonly-change");
+    }) ||
+    null;
+
+  const setAutoSymbol =
+    setAutoByDescription ||
+    Object.getOwnPropertySymbols(level1 || {}).find((symbol) => {
+      const fn = level1?.[symbol];
+      if (typeof fn !== "function" || fn.length !== 2) return false;
+      const source = String(fn);
+      return source.includes("auto-change");
+    }) ||
+    null;
+
+  return { addSymbol, resetSymbol, selectSymbol, setReadonlySymbol, setAutoSymbol };
 }
 
 function subtitleTrackUrl(url) {
@@ -295,11 +357,8 @@ function WatchPage() {
     const list = node?.qualities;
     if (!node || !list) return;
 
-    const addSymbol = findInternalSymbol(list, "LIST_ADD");
-    const resetSymbol = findInternalSymbol(list, "LIST_RESET");
-    const selectSymbol = findInternalSymbol(list, "LIST_SELECT");
-    const setReadonlySymbol = findInternalSymbol(list, "LIST_SET_READONLY");
-    const setAutoSymbol = findInternalSymbol(list, "SET_AUTO_QUALITY");
+    const { addSymbol, resetSymbol, selectSymbol, setReadonlySymbol, setAutoSymbol } =
+      resolveQualityListSymbols(list);
     if (!addSymbol || !resetSymbol || !selectSymbol) return;
 
     const syncQualityMenu = () => {

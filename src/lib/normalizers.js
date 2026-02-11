@@ -126,6 +126,80 @@ export function normalizeSeries(item, index) {
 }
 
 export function normalizeEpisode(item, index) {
+  function inferLang(value) {
+    const input = String(value || "").trim().toLowerCase();
+    if (!input) return { lang: "id", label: "Indonesian" };
+    if (input === "id" || input === "in" || input.includes("indo")) {
+      return { lang: "id", label: "Indonesian" };
+    }
+    if (input === "en" || input.includes("eng")) return { lang: "en", label: "English" };
+    return { lang: input.slice(0, 2), label: String(value) };
+  }
+
+  function collectSubtitleTracks(payload, bucket) {
+    if (!payload) return;
+
+    if (typeof payload === "string") {
+      const url = payload.trim();
+      if (/^https?:\/\//i.test(url) && /\.srt(\?|#|$)/i.test(url)) {
+        bucket.push({ url, kind: "subtitles" });
+      }
+      return;
+    }
+
+    if (Array.isArray(payload)) {
+      payload.forEach((entry) => collectSubtitleTracks(entry, bucket));
+      return;
+    }
+
+    if (typeof payload !== "object") return;
+
+    const objectUrl =
+      payload.srtUrl ||
+      payload.subtitleUrl ||
+      payload.subtitle_url ||
+      payload.url ||
+      payload.file ||
+      payload.path ||
+      "";
+    if (typeof objectUrl === "string" && /^https?:\/\//i.test(objectUrl) && /\.srt(\?|#|$)/i.test(objectUrl)) {
+      const langMeta = inferLang(
+        payload.lang ||
+          payload.language ||
+          payload.captionLanguage ||
+          payload.srclang ||
+          payload.label,
+      );
+      bucket.push({
+        url: objectUrl,
+        label: payload.label || langMeta.label,
+        lang: payload.srclang || langMeta.lang,
+        kind: payload.kind || "subtitles",
+        isDefault: Boolean(payload.default || payload.isDefault),
+      });
+    }
+
+    const subtitleKeys = [
+      "subtitle",
+      "subtitles",
+      "subLanguageVoList",
+      "subtitleList",
+      "subtitle_list",
+      "subtitlePath",
+      "subtitle_path",
+      "subtitleUrl",
+      "subtitle_url",
+      "srt",
+      "srtUrl",
+      "caption",
+      "captions",
+      "tracks",
+    ];
+    subtitleKeys.forEach((key) => {
+      if (key in payload) collectSubtitleTracks(payload[key], bucket);
+    });
+  }
+
   const defaultCdn = Array.isArray(item?.cdnList)
     ? item.cdnList.find((cdn) => cdn?.isDefault) || item.cdnList[0]
     : null;
@@ -134,23 +208,77 @@ export function normalizeEpisode(item, index) {
     : null;
   const allSources = Array.isArray(item?.cdnList)
     ? item.cdnList
-        .flatMap((cdn) => (Array.isArray(cdn?.videoPathList) ? cdn.videoPathList : []))
+        .flatMap((cdn, cdnIndex) =>
+          (Array.isArray(cdn?.videoPathList) ? cdn.videoPathList : []).map((video) => ({
+            ...video,
+            __cdnIndex: cdnIndex,
+            __cdnDefault: Boolean(cdn?.isDefault),
+          })),
+        )
         .map((video) => ({
           quality: Number(video?.quality) || 0,
           url: video?.videoPath || "",
           isDefault: Boolean(video?.isDefault),
+          cdnIndex: Number(video?.__cdnIndex) || 0,
+          cdnDefault: Boolean(video?.__cdnDefault),
         }))
         .filter((source) => source.url)
     : [];
   const qualityMap = new Map();
   for (const source of allSources) {
     const key = String(source.quality);
-    const existing = qualityMap.get(key);
-    if (!existing || source.isDefault) {
-      qualityMap.set(key, source);
-    }
+    if (!qualityMap.has(key)) qualityMap.set(key, []);
+    qualityMap.get(key).push(source);
   }
-  const uniqueSources = Array.from(qualityMap.values()).sort((a, b) => b.quality - a.quality);
+  const uniqueSources = Array.from(qualityMap.entries())
+    .map(([qualityKey, entries]) => {
+      const ordered = [...entries].sort((a, b) => {
+        if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+        if (a.cdnDefault !== b.cdnDefault) return a.cdnDefault ? -1 : 1;
+        return a.cdnIndex - b.cdnIndex;
+      });
+      const primary = ordered[0];
+      const seen = new Set([primary?.url]);
+      const backupUrls = ordered
+        .map((entry) => entry.url)
+        .filter((url) => {
+          if (!url || seen.has(url)) return false;
+          seen.add(url);
+          return true;
+        });
+
+      return {
+        quality: Number(qualityKey) || 0,
+        url: primary?.url || "",
+        isDefault: Boolean(primary?.isDefault),
+        backupUrls,
+      };
+    })
+    .filter((source) => source.url)
+    .sort((a, b) => b.quality - a.quality);
+  const subtitleBucket = [];
+  collectSubtitleTracks(item, subtitleBucket);
+
+  const subtitleMap = new Map();
+  subtitleBucket.forEach((track, indexTrack) => {
+    if (!track?.url) return;
+    const key = track.url;
+    const langMeta = inferLang(track.lang || track.label);
+    if (!subtitleMap.has(key)) {
+      subtitleMap.set(key, {
+        id: `${index}-${indexTrack}`,
+        url: key,
+        label: track.label || langMeta.label,
+        lang: track.lang || langMeta.lang,
+        kind: track.kind || "subtitles",
+        isDefault: Boolean(track.isDefault) || subtitleMap.size === 0,
+      });
+    } else if (track.isDefault) {
+      const existing = subtitleMap.get(key);
+      subtitleMap.set(key, { ...existing, isDefault: true });
+    }
+  });
+  const subtitles = Array.from(subtitleMap.values());
 
   const rawEpisode =
     item?.chapterIndex + 1 ||
@@ -171,5 +299,6 @@ export function normalizeEpisode(item, index) {
     duration: item?.duration || item?.runtime || "",
     streamUrl: defaultVideo?.videoPath || "",
     sources: uniqueSources,
+    subtitles,
   };
 }

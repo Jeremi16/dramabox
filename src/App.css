@@ -358,8 +358,17 @@
 .vds-player {
   width: min(430px, 100%);
   aspect-ratio: 9 / 16;
+  position: relative;
   --media-brand: #e50914;
   --media-focus: #e50914;
+  --media-captions-padding: 2.5% 4% 14%;
+  --media-cue-bg: transparent;
+  --media-cue-backdrop: none;
+  --media-cue-box-shadow: none;
+  --media-cue-display-bg: transparent;
+  --media-cue-text-shadow: none;
+  --media-cue-font-size: 24px;
+  --media-large-fullscreen-cue-font-size: 24px;
   --media-controls-color: #fff;
   --media-control-bg: rgba(14, 14, 19, 0.78);
   --media-menu-bg: rgba(8, 9, 13, 0.95);
@@ -372,52 +381,12 @@
     0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
-.player-quality-overlay {
-  position: absolute;
-  top: 1.15rem;
-  right: 1.15rem;
-  z-index: 8;
-}
-
-.player-quality-overlay label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: rgba(6, 7, 10, 0.74);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 10px;
-  padding: 0.28rem 0.4rem;
-  backdrop-filter: blur(7px);
-}
-
-.player-quality-overlay span {
-  color: #f2f4ff;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.player-quality-overlay select {
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
-  background: rgba(8, 8, 12, 0.96);
-  color: #fff;
-  padding: 0.18rem 0.45rem;
-  font-size: 0.74rem;
-}
-
-/* Keep built-in Vidstack quality selector hidden, using our custom selector below player. */
-:where(.vds-player media-quality-menu-button),
-:where(.vds-player media-quality-menu-items) {
-  display: none !important;
-}
-
-
 .vds-player[data-fullscreen] {
   width: 100vw !important;
   height: 100vh !important;
   max-width: none !important;
   aspect-ratio: auto !important;
+  --media-captions-padding: 2.5% 4% 17%;
   border-radius: 0 !important;
   box-shadow: none !important;
 }
@@ -538,12 +507,11 @@
 
   .vds-player {
     width: min(380px, 100%);
+    --media-captions-padding: 2% 3% 12%;
+    --media-cue-font-size: 20px;
+    --media-large-fullscreen-cue-font-size: 20px;
   }
 
-  .player-quality-overlay {
-    top: 0.95rem;
-    right: 0.95rem;
-  }
 }
 
 @media (max-width: 520px) {

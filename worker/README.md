@@ -7,6 +7,7 @@ Alur:
 2. Kalau `hit: true` -> pakai data cache
 3. Kalau `hit: false` -> client fetch langsung ke API utama
 4. Client simpan hasil ke Worker (`POST /cache`)
+5. Subtitle `.srt` diproxy via Worker (`GET /subtitle?url=...`) supaya lolos CORS browser
 
 ## 1) Buat KV Namespace
 
@@ -41,6 +42,11 @@ VITE_DRAMABOX_CACHE_WRITE_TOKEN=<sama_dengan_CACHE_WRITE_TOKEN_worker>
 > Catatan: token write ada di client-side env, jadi ini proteksi praktis (bukan secret sempurna). Tetap gunakan `ALLOWED_ORIGINS` + rate limit.
 
 ## Endpoint Worker
+
+### `GET /subtitle?url=<subtitle-url>`
+Proxy subtitle `.srt` dengan header CORS dari Worker.
+Contoh:
+`/subtitle?url=https%3A%2F%2Fhwztvideo.dramaboxdb.com%2F...%2Fin.srt`
 
 ### `GET /cache?path=<cache-key>`
 Response:

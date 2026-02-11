@@ -1,10 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { API_CONFIG } from "../config/api";
 import { fetchEpisodes, fetchSeriesDetail, fetchStream } from "../lib/apiClient";
 
-function qualityLabel(source) {
-  if (!source?.quality) return "Auto";
-  return `${source.quality}p`;
+function estimateBitrate(height) {
+  if (height >= 1080) return 5500000;
+  if (height >= 720) return 3000000;
+  if (height >= 540) return 1800000;
+  if (height >= 360) return 1000000;
+  return 450000;
+}
+
+function findInternalSymbol(target, description) {
+  let current = target;
+  while (current) {
+    const match = Object.getOwnPropertySymbols(current).find((symbol) => symbol.description === description);
+    if (match) return match;
+    current = Object.getPrototypeOf(current);
+  }
+  return null;
+}
+
+function subtitleTrackUrl(url) {
+  if (!url) return "";
+  const gateway = API_CONFIG.cacheGatewayUrl?.trim();
+  if (!gateway) return url;
+
+  try {
+    const endpoint = new URL(gateway);
+    endpoint.pathname = endpoint.pathname.replace(/\/cache\/?$/i, "/subtitle");
+    if (!/\/subtitle$/i.test(endpoint.pathname)) {
+      endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, "")}/subtitle`;
+    }
+    endpoint.search = "";
+    endpoint.searchParams.set("url", url);
+    return endpoint.toString();
+  } catch {
+    return url;
+  }
 }
 
 function WatchPage() {
@@ -14,6 +47,8 @@ function WatchPage() {
   const playerRef = useRef(null);
   const shouldAutoPlayRef = useRef(false);
   const refreshRetryRef = useRef(new Set());
+  const sourceRetryRef = useRef(new Set());
+  const syncingQualityMenuRef = useRef(false);
   const [seriesDetail, setSeriesDetail] = useState(series);
 
   const [episodes, setEpisodes] = useState([]);
@@ -27,6 +62,7 @@ function WatchPage() {
 
   useEffect(() => {
     refreshRetryRef.current = new Set();
+    sourceRetryRef.current = new Set();
   }, [seriesId]);
 
   useEffect(() => {
@@ -81,11 +117,6 @@ function WatchPage() {
     };
   }, [seriesId]);
 
-  const qualityOptions = useMemo(() => {
-    if (!selectedEpisode?.sources?.length) return [];
-    return selectedEpisode.sources;
-  }, [selectedEpisode]);
-
   const canAutoNext = useMemo(() => {
     if (!selectedEpisode) return false;
     return episodes.some((episode) => Number(episode.episode) > Number(selectedEpisode.episode));
@@ -93,6 +124,9 @@ function WatchPage() {
 
   async function handleWatch(episode, preferredQuality = null, shouldAutoPlay = false) {
     setSelectedEpisode(episode);
+    sourceRetryRef.current = new Set(
+      [...sourceRetryRef.current].filter((key) => !key.startsWith(`${episode.id}|`)),
+    );
     setLoadingStream(true);
     setError("");
     shouldAutoPlayRef.current = shouldAutoPlay;
@@ -120,8 +154,7 @@ function WatchPage() {
     }
   }
 
-  function handleQualityChange(event) {
-    const nextQuality = event.target.value;
+  function applyQuality(nextQuality) {
     setQuality(nextQuality);
     if (!selectedEpisode?.sources?.length) return;
 
@@ -157,22 +190,8 @@ function WatchPage() {
 
     try {
       await node.play?.();
-      return;
     } catch {
-      // Fallback untuk browser yang memblok autoplay bersuara.
-    }
-
-    const previousMuted = Boolean(node.muted);
-    node.muted = true;
-    try {
-      await node.play?.();
-      if (!previousMuted) {
-        setTimeout(() => {
-          if (playerRef.current) playerRef.current.muted = false;
-        }, 250);
-      }
-    } catch {
-      // Biarkan user menekan play manual jika policy browser sangat ketat.
+      // Biarkan user menekan play manual jika autoplay diblokir.
     }
   }
 
@@ -189,7 +208,37 @@ function WatchPage() {
     const node = playerRef.current;
     if (!node || !selectedEpisode) return;
 
+    function episodeSourceUrls() {
+      if (!selectedEpisode?.sources?.length) return [];
+      const preferredSource =
+        quality && quality !== "auto"
+          ? selectedEpisode.sources.find((source) => String(source.quality) === String(quality))
+          : selectedEpisode.sources.find((source) => source.isDefault) || selectedEpisode.sources[0];
+      if (!preferredSource) return [];
+
+      const urls = [preferredSource.url, ...(preferredSource.backupUrls || [])].filter(Boolean);
+      const seen = new Set();
+      return urls.filter((url) => {
+        if (seen.has(url)) return false;
+        seen.add(url);
+        return true;
+      });
+    }
+
     async function handleStreamError() {
+      const orderedUrls = episodeSourceUrls();
+      const currentUrlIndex = orderedUrls.findIndex((url) => url === streamUrl);
+      if (currentUrlIndex !== -1 && currentUrlIndex + 1 < orderedUrls.length) {
+        const nextUrl = orderedUrls[currentUrlIndex + 1];
+        const retryKey = `${selectedEpisode.id}|${nextUrl}`;
+        if (!sourceRetryRef.current.has(retryKey)) {
+          sourceRetryRef.current.add(retryKey);
+          setStreamUrl(nextUrl);
+          shouldAutoPlayRef.current = true;
+          return;
+        }
+      }
+
       const episodeKey = String(selectedEpisode.id);
       if (refreshRetryRef.current.has(episodeKey)) return;
       refreshRetryRef.current.add(episodeKey);
@@ -208,7 +257,7 @@ function WatchPage() {
     return () => {
       node.removeEventListener("error", handleStreamError);
     };
-  }, [selectedEpisode, seriesId, streamUrl]);
+  }, [quality, selectedEpisode, seriesId, streamUrl]);
 
   useEffect(() => {
     if (!streamUrl || !shouldAutoPlayRef.current) return;
@@ -234,6 +283,103 @@ function WatchPage() {
       node.removeEventListener("can-play-through", onReady);
     };
   }, [streamUrl]);
+
+  useEffect(() => {
+    const node = playerRef.current;
+    if (!node || !streamUrl) return;
+    node.muted = false;
+  }, [streamUrl]);
+
+  useEffect(() => {
+    const node = playerRef.current;
+    const list = node?.qualities;
+    if (!node || !list) return;
+
+    const addSymbol = findInternalSymbol(list, "LIST_ADD");
+    const resetSymbol = findInternalSymbol(list, "LIST_RESET");
+    const selectSymbol = findInternalSymbol(list, "LIST_SELECT");
+    const setReadonlySymbol = findInternalSymbol(list, "LIST_SET_READONLY");
+    const setAutoSymbol = findInternalSymbol(list, "SET_AUTO_QUALITY");
+    if (!addSymbol || !resetSymbol || !selectSymbol) return;
+
+    const syncQualityMenu = () => {
+      const sources = selectedEpisode?.sources || [];
+      syncingQualityMenuRef.current = true;
+      try {
+        list[resetSymbol]?.();
+        if (setReadonlySymbol) list[setReadonlySymbol](false);
+
+        sources.forEach((source, index) => {
+          const height = Number(source.quality) || 0;
+          list[addSymbol](
+            {
+              id: `manual-${height}-${index}`,
+              width: 0,
+              height,
+              bitrate: estimateBitrate(height),
+            },
+            undefined,
+          );
+        });
+
+        const activeSource =
+          quality === "auto"
+            ? sources.find((source) => source.isDefault) || sources[0]
+            : sources.find((source) => String(source.quality) === String(quality)) ||
+              sources.find((source) => source.isDefault) ||
+              sources[0];
+
+        const activeHeight = Number(activeSource?.quality) || 0;
+        const activeQualityItem = list.toArray().find((item) => Number(item.height) === activeHeight);
+        if (activeQualityItem) {
+          list[selectSymbol](activeQualityItem, true);
+        }
+
+        if (setAutoSymbol) list[setAutoSymbol](quality === "auto");
+      } finally {
+        setTimeout(() => {
+          syncingQualityMenuRef.current = false;
+        }, 0);
+      }
+    };
+
+    syncQualityMenu();
+    node.addEventListener("loadedmetadata", syncQualityMenu);
+    node.addEventListener("canplay", syncQualityMenu);
+    return () => {
+      node.removeEventListener("loadedmetadata", syncQualityMenu);
+      node.removeEventListener("canplay", syncQualityMenu);
+    };
+  }, [quality, selectedEpisode, streamUrl, loadingStream]);
+
+  useEffect(() => {
+    const node = playerRef.current;
+    const list = node?.qualities;
+    if (!node || !list) return;
+
+    const onQualityChanged = () => {
+      if (syncingQualityMenuRef.current) return;
+      const selectedQuality = list.selected;
+      if (!selectedQuality) return;
+      const nextQuality = String(Number(selectedQuality.height) || "auto");
+      if (!nextQuality || nextQuality === quality) return;
+      applyQuality(nextQuality);
+    };
+
+    const onQualityRequest = (event) => {
+      if (syncingQualityMenuRef.current) return;
+      if (Number(event.detail) !== -1) return;
+      if (quality === "auto") return;
+      applyQuality("auto");
+    };
+
+    list.addEventListener("change", onQualityChanged);
+    node.addEventListener("media-quality-change-request", onQualityRequest);
+    return () => {
+      list.removeEventListener("change", onQualityChanged);
+      node.removeEventListener("media-quality-change-request", onQualityRequest);
+    };
+  }, [quality, selectedEpisode, streamUrl]);
 
   return (
     <main className="watch-panel page-panel">
@@ -278,32 +424,32 @@ function WatchPage() {
         ) : streamUrl ? (
           <>
             <media-player
+              key={`${selectedEpisode?.id || "idle"}:${streamUrl || "empty"}`}
               ref={playerRef}
               class="vds-player"
               src={streamUrl}
               poster={seriesDetail?.poster || ""}
               title={seriesDetail?.title || `Series ${seriesId}`}
-              crossorigin
+              crossorigin="anonymous"
               playsinline
+              fullscreen-orientation="none"
+              muted={false}
             >
-              <media-outlet />
+              <media-outlet>
+                {(selectedEpisode?.subtitles || []).map((track, index) => (
+                  <track
+                    key={`${track.url}-${index}`}
+                    src={subtitleTrackUrl(track.url)}
+                    kind="subtitles"
+                    label={track.label || `Subtitle ${index + 1}`}
+                    srclang={track.lang || "id"}
+                    data-type="vtt"
+                    default={Boolean(track.isDefault || index === 0)}
+                  />
+                ))}
+              </media-outlet>
               <media-community-skin />
             </media-player>
-            {selectedEpisode ? (
-              <div className="player-quality-overlay">
-                <label>
-                  <span>Quality</span>
-                  <select value={quality} onChange={handleQualityChange} disabled={!qualityOptions.length}>
-                    <option value="auto">Auto</option>
-                    {qualityOptions.map((source) => (
-                      <option key={`${source.quality}-${source.url}`} value={String(source.quality)}>
-                        {qualityLabel(source)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            ) : null}
           </>
         ) : (
           <p className="muted">Pilih episode untuk mulai menonton.</p>
@@ -313,6 +459,7 @@ function WatchPage() {
       {selectedEpisode ? (
         <div className="player-tools">
           <small>{canAutoNext ? "Auto-next aktif" : "Episode terakhir"}</small>
+          <small>Subtitle diatur dari menu roda gerigi player.</small>
         </div>
       ) : null}
 

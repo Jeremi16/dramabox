@@ -2,6 +2,7 @@ const CACHE_PREFIX = "dramabox:v2:";
 const MAX_KEY_LENGTH = 512;
 const MAX_TTL_SECONDS = 60 * 60 * 24 * 7;
 const DEFAULT_WRITE_LIMIT_PER_MINUTE = 120;
+const SUBTITLE_ALLOWED_HOSTS = ["dramaboxdb.com", "dramabox.sansekai.my.id"];
 
 function splitAllowedOrigins(value = "") {
   return value
@@ -47,6 +48,32 @@ function validateCacheKey(path) {
 
 function normalizedCacheKey(path) {
   return `${CACHE_PREFIX}${path}`;
+}
+
+function isAllowedSubtitleHost(hostname = "") {
+  const host = String(hostname || "").toLowerCase();
+  return SUBTITLE_ALLOWED_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+}
+
+function subtitleResponse(body, status, contentType, origin, env, extraHeaders = {}) {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": contentType || "application/x-subrip; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+      ...corsHeaders(origin, env),
+      ...extraHeaders,
+    },
+  });
+}
+
+function srtToVtt(text = "") {
+  const normalized = String(text).replace(/^\uFEFF/, "");
+  const withDotTime = normalized.replace(
+    /(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})/g,
+    "$1.$2 --> $3.$4",
+  );
+  return `WEBVTT\n\n${withDotTime}`;
 }
 
 async function enforceWriteRateLimit(env, ip) {
@@ -97,6 +124,52 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (url.pathname === "/subtitle" && request.method === "GET") {
+      const subtitleUrlRaw = url.searchParams.get("url") || "";
+      if (!subtitleUrlRaw) {
+        return jsonResponse(400, { error: "url subtitle wajib diisi" }, origin, env);
+      }
+
+      let subtitleUrl;
+      try {
+        subtitleUrl = new URL(subtitleUrlRaw);
+      } catch {
+        return jsonResponse(400, { error: "url subtitle tidak valid" }, origin, env);
+      }
+
+      if (!["http:", "https:"].includes(subtitleUrl.protocol)) {
+        return jsonResponse(400, { error: "protocol subtitle tidak didukung" }, origin, env);
+      }
+
+      if (!isAllowedSubtitleHost(subtitleUrl.hostname)) {
+        return jsonResponse(403, { error: "host subtitle tidak diizinkan" }, origin, env);
+      }
+
+      try {
+        const upstream = await fetch(subtitleUrl.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/x-subrip,text/plain,text/vtt,*/*",
+          },
+        });
+
+        if (!upstream.ok) {
+          return jsonResponse(
+            502,
+            { error: `Gagal mengambil subtitle upstream (${upstream.status})` },
+            origin,
+            env,
+          );
+        }
+
+        const text = await upstream.text();
+        const vtt = srtToVtt(text);
+        return subtitleResponse(vtt, 200, "text/vtt; charset=utf-8", origin, env);
+      } catch {
+        return jsonResponse(502, { error: "Gagal mengambil subtitle upstream" }, origin, env);
+      }
+    }
+
     if (url.pathname !== "/cache") {
       return jsonResponse(404, { error: "Route not found" }, origin, env);
     }

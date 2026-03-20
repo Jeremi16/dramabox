@@ -41,7 +41,9 @@ function detectSourceFromId(id) {
   const idStr = String(id || "");
 
   try {
-    const sourceMap = JSON.parse(localStorage.getItem("seriesSourceMap") || "{}");
+    const sourceMap = JSON.parse(
+      localStorage.getItem("seriesSourceMap") || "{}",
+    );
     if (sourceMap[idStr] === SOURCE_MELOLO) return SOURCE_MELOLO;
     if (sourceMap[idStr] === SOURCE_DRAMABOX) return SOURCE_DRAMABOX;
   } catch {
@@ -74,7 +76,9 @@ function persistSeriesCache(items = []) {
   if (!Array.isArray(items) || !items.length) return;
   try {
     const seriesCache = JSON.parse(localStorage.getItem("seriesCache") || "{}");
-    const sourceMap = JSON.parse(localStorage.getItem("seriesSourceMap") || "{}");
+    const sourceMap = JSON.parse(
+      localStorage.getItem("seriesSourceMap") || "{}",
+    );
 
     items.forEach((item) => {
       if (!item?.id) return;
@@ -168,15 +172,18 @@ export async function fetchCatalog(kind, page = 1, extraParams = {}) {
     if (page > 1) return [];
 
     const endpointMap = {
-      foryou: "api/melolo/latest",
-      new: "api/melolo/latest",
-      rank: "api/melolo/trending",
+      foryou: "latest",
+      new: "latest",
+      rank: "trending",
     };
     const endpoint = endpointMap[kind] || kind;
     const params = toQuery(restParams);
-    const payload = await apiRequest(`/${endpoint}${params ? `?${params}` : ""}`, {
-      source,
-    });
+    const payload = await apiRequest(
+      `/${endpoint}${params ? `?${params}` : ""}`,
+      {
+        source,
+      },
+    );
     const items = parseMeloloCatalogPayload(payload);
     persistSeriesCache(items);
     return items;
@@ -205,8 +212,10 @@ export async function fetchCatalogCombined(kind, page = 1, extraParams = {}) {
   ]);
 
   const results = [];
-  if (dramaboxResults.status === "fulfilled") results.push(...dramaboxResults.value);
-  if (meloloResults.status === "fulfilled") results.push(...meloloResults.value);
+  if (dramaboxResults.status === "fulfilled")
+    results.push(...dramaboxResults.value);
+  if (meloloResults.status === "fulfilled")
+    results.push(...meloloResults.value);
 
   const finalResults = dedupeSeries(results);
   persistSeriesCache(finalResults);
@@ -235,8 +244,10 @@ export async function searchCatalogCombined(query) {
   ]);
 
   const results = [];
-  if (dramaboxResults.status === "fulfilled") results.push(...dramaboxResults.value);
-  if (meloloResults.status === "fulfilled") results.push(...meloloResults.value);
+  if (dramaboxResults.status === "fulfilled")
+    results.push(...dramaboxResults.value);
+  if (meloloResults.status === "fulfilled")
+    results.push(...meloloResults.value);
   const finalResults = dedupeSeries(results);
   persistSeriesCache(finalResults);
   return finalResults;
@@ -261,16 +272,23 @@ export async function fetchSeriesById(seriesId) {
   return null;
 }
 
-export async function fetchEpisodes(seriesId, options = {}, seriesDetail = null) {
+export async function fetchEpisodes(
+  seriesId,
+  options = {},
+  seriesDetail = null,
+) {
   const source = options?.source || detectSourceFromId(seriesId);
   if (source === SOURCE_MELOLO) {
     return fetchEpisodesByProvider(seriesId, SOURCE_MELOLO, seriesDetail);
   }
 
-  const payload = await apiRequest(`/api/chapters/${encodeURIComponent(seriesId)}`, {
-    ...options,
-    source: SOURCE_DRAMABOX,
-  });
+  const payload = await apiRequest(
+    `/api/chapters/${encodeURIComponent(seriesId)}`,
+    {
+      ...options,
+      source: SOURCE_DRAMABOX,
+    },
+  );
   return parseDramaboxEpisodesPayload(payload);
 }
 
@@ -298,7 +316,7 @@ export async function fetchSeriesDetailByProvider(seriesId, provider) {
 
   if (source === SOURCE_MELOLO) {
     const payload = await apiRequest(
-      `/api/melolo/detail/${encodeURIComponent(seriesId)}`,
+      `/detail/${encodeURIComponent(seriesId)}`,
       { source },
     );
     const detail = parseMeloloSeriesDetailPayload(payload, seriesId);
@@ -309,9 +327,12 @@ export async function fetchSeriesDetailByProvider(seriesId, provider) {
     return detail;
   }
 
-  const payload = await apiRequest(`/api/detail/${encodeURIComponent(seriesId)}/v2`, {
-    source,
-  });
+  const payload = await apiRequest(
+    `/api/detail/${encodeURIComponent(seriesId)}/v2`,
+    {
+      source,
+    },
+  );
   const detail = parseDramaboxSeriesDetailPayload(payload, seriesId);
   persistSeriesCache([detail]);
   return detail;
@@ -325,11 +346,17 @@ export async function fetchEpisodesByProvider(
   const source = resolveSourceFromProvider(provider);
 
   if (source === SOURCE_MELOLO) {
-    const fromDetail = parseMeloloEpisodesFromSeriesDetail(seriesDetail, seriesId);
+    const fromDetail = parseMeloloEpisodesFromSeriesDetail(
+      seriesDetail,
+      seriesId,
+    );
     if (fromDetail.length) return fromDetail;
 
     try {
-      const freshDetail = await fetchSeriesDetailByProvider(seriesId, SOURCE_MELOLO);
+      const freshDetail = await fetchSeriesDetailByProvider(
+        seriesId,
+        SOURCE_MELOLO,
+      );
       const fromFreshDetail = parseMeloloEpisodesFromSeriesDetail(
         freshDetail,
         seriesId,
@@ -342,9 +369,12 @@ export async function fetchEpisodesByProvider(
     return meloloEpisodeFallback(seriesId);
   }
 
-  const payload = await apiRequest(`/api/chapters/${encodeURIComponent(seriesId)}`, {
-    source,
-  });
+  const payload = await apiRequest(
+    `/api/chapters/${encodeURIComponent(seriesId)}`,
+    {
+      source,
+    },
+  );
   return parseDramaboxEpisodesPayload(payload);
 }
 
@@ -358,7 +388,7 @@ export async function fetchStream(seriesId, episodeNumber, options = {}) {
     }
 
     const payload = await apiRequest(
-      `/api/melolo/stream/${encodeURIComponent(streamVid)}`,
+      `/stream/${encodeURIComponent(streamVid)}`,
       { ...options, source: SOURCE_MELOLO },
     );
     const url = parseMeloloStreamUrl(payload);
@@ -367,7 +397,10 @@ export async function fetchStream(seriesId, episodeNumber, options = {}) {
   }
 
   const endpoint = `/api/stream?bookId=${encodeURIComponent(seriesId)}&chapter=${episodeNumber}`;
-  const payload = await apiRequest(endpoint, { ...options, source: SOURCE_DRAMABOX });
+  const payload = await apiRequest(endpoint, {
+    ...options,
+    source: SOURCE_DRAMABOX,
+  });
   const url = parseDramaboxStreamUrl(payload);
   if (!url) throw new Error("Link stream tidak ditemukan pada respons API.");
   return url;

@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { API_CONFIG } from "../config/api";
-import { fetchEpisodes, fetchSeriesDetail, fetchStream } from "../lib/apiClient";
+import {
+  fetchEpisodes,
+  fetchEpisodesByProvider,
+  fetchSeriesDetail,
+  fetchSeriesDetailByProvider,
+  fetchStream,
+} from "../lib/apiClient";
 import { useContinueWatching } from "../hooks/useContinueWatching";
+import HeicImage from "../components/HeicImage";
 import "./WatchPage.css";
 
 function estimateBitrate(height) {
@@ -33,7 +40,10 @@ function resolveQualityListSymbols(list) {
   const selectByDescription = findInternalSymbol(list, "LIST_SELECT");
   const addByDescription = findInternalSymbol(list, "LIST_ADD");
   const resetByDescription = findInternalSymbol(list, "LIST_RESET");
-  const setReadonlyByDescription = findInternalSymbol(list, "LIST_SET_READONLY");
+  const setReadonlyByDescription = findInternalSymbol(
+    list,
+    "LIST_SET_READONLY",
+  );
   const setAutoByDescription = findInternalSymbol(list, "SET_AUTO_QUALITY");
 
   const selectSymbol =
@@ -82,7 +92,13 @@ function resolveQualityListSymbols(list) {
     }) ||
     null;
 
-  return { addSymbol, resetSymbol, selectSymbol, setReadonlySymbol, setAutoSymbol };
+  return {
+    addSymbol,
+    resetSymbol,
+    selectSymbol,
+    setReadonlySymbol,
+    setAutoSymbol,
+  };
 }
 
 function subtitleTrackUrl(url) {
@@ -105,10 +121,70 @@ function subtitleTrackUrl(url) {
   }
 }
 
+function pickPreferredValue(nextValue, prevValue) {
+  if (nextValue === undefined || nextValue === null) return prevValue;
+  if (typeof nextValue === "string" && nextValue.trim() === "") {
+    return prevValue;
+  }
+  if (Array.isArray(nextValue) && nextValue.length === 0) return prevValue;
+  return nextValue;
+}
+
+function mergeSeriesDetailData(prev = {}, next = {}) {
+  if (!next || typeof next !== "object") return prev || {};
+  if (!prev || typeof prev !== "object") return next;
+
+  return {
+    ...prev,
+    ...next,
+    source: pickPreferredValue(next.source, prev.source),
+    title: pickPreferredValue(next.title, prev.title),
+    synopsis: pickPreferredValue(next.synopsis, prev.synopsis),
+    poster: pickPreferredValue(next.poster, prev.poster),
+    rating: pickPreferredValue(next.rating, prev.rating),
+    status: pickPreferredValue(next.status, prev.status),
+    totalEpisodes: pickPreferredValue(next.totalEpisodes, prev.totalEpisodes),
+    firstChapterId: pickPreferredValue(next.firstChapterId, prev.firstChapterId),
+    lastChapterId: pickPreferredValue(next.lastChapterId, prev.lastChapterId),
+    genres:
+      Array.isArray(next.genres) && next.genres.length
+        ? next.genres
+        : prev.genres,
+  };
+}
+
 function WatchPage() {
-  const { seriesId } = useParams();
+  const { seriesId, provider } = useParams();
   const location = useLocation();
-  const series = useMemo(() => location.state?.series || null, [location.state]);
+
+  // Coba ambil dari location.state dulu, jika tidak ada coba dari localStorage
+  const series = useMemo(() => {
+    if (location.state?.series?.id === seriesId) {
+      return location.state.series;
+    }
+    if (provider === "melolo") {
+      return null;
+    }
+    // Coba ambil dari cache
+    try {
+      const seriesCache = JSON.parse(
+        localStorage.getItem("seriesCache") || "{}",
+      );
+      return seriesCache[seriesId] || null;
+    } catch {
+      return null;
+    }
+  }, [location.state, provider, seriesId]);
+
+  // Provider dari URL (dramabox/melolo) atau dari state/cache
+  const detectedProvider = useMemo(() => {
+    if (provider === "dramabox" || provider === "melolo") {
+      return provider;
+    }
+    // Fallback ke provider dari series data
+    return series?.source || null;
+  }, [provider, series]);
+
   const playerRef = useRef(null);
   const shouldAutoPlayRef = useRef(false);
   const refreshRetryRef = useRef(new Set());
@@ -124,18 +200,23 @@ function WatchPage() {
   const [loadingStream, setLoadingStream] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(!series);
   const [error, setError] = useState("");
+  const episodesRef = useRef([]);
 
   // Continue watching feature
   useContinueWatching(
-    seriesId, 
-    selectedEpisode?.episode, 
+    seriesId,
+    selectedEpisode?.episode,
     {
       title: seriesDetail?.title,
       poster: seriesDetail?.poster,
-      totalEpisodes: episodes.length
+      totalEpisodes: episodes.length,
     },
-    playerRef
+    playerRef,
   );
+
+  useEffect(() => {
+    episodesRef.current = episodes;
+  }, [episodes]);
 
   useEffect(() => {
     refreshRetryRef.current = new Set();
@@ -146,31 +227,50 @@ function WatchPage() {
     let cancelled = false;
 
     async function run() {
-      // If we already have series data from navigation state, use it
-      if (series && series.id === seriesId) {
-        setSeriesDetail(series);
-        setLoadingDetail(false);
-        return;
-      }
-
       setLoadingDetail(true);
       try {
-        const detail = await fetchSeriesDetail(seriesId);
-        if (!cancelled) {
-          setSeriesDetail((prev) => {
-            // Merge with existing data, prioritizing new data
-            return { ...prev, ...detail };
-          });
+        // Selalu gunakan data dari state jika tersedia dan sama ID-nya
+        const initialData = series?.id === seriesId ? series : null;
+        if (initialData) {
+          setSeriesDetail(initialData);
+        }
+
+        // Fetch detail dari API (bisa dari provider atau auto-detect)
+        let detail = null;
+        if (detectedProvider) {
+          detail = await fetchSeriesDetailByProvider(
+            seriesId,
+            detectedProvider,
+          );
+        } else {
+          detail = await fetchSeriesDetail(seriesId);
+        }
+
+        if (!cancelled && detail) {
+          // Jangan timpa data existing dengan nilai kosong dari API detail.
+          setSeriesDetail((prev) => mergeSeriesDetailData(prev, detail));
+          // Simpan ke cache
+          try {
+            const seriesCache = JSON.parse(
+              localStorage.getItem("seriesCache") || "{}",
+            );
+            seriesCache[seriesId] = mergeSeriesDetailData(
+              seriesCache[seriesId] || initialData,
+              detail,
+            );
+            localStorage.setItem("seriesCache", JSON.stringify(seriesCache));
+          } catch {
+            // Ignore
+          }
         }
       } catch (error) {
-        console.error('Error fetching detail:', error);
-        if (!cancelled) {
-          // If we have series from state, keep it
-          if (series) {
-            setSeriesDetail(series);
-          } else {
-            setSeriesDetail({ id: seriesId, title: 'Loading...' });
-          }
+        console.error("Error fetching detail:", error);
+        // Jika gagal dan tidak ada data awal, tampilkan error
+        if (!cancelled && !seriesDetail) {
+          setSeriesDetail({
+            id: seriesId,
+            title: "Series tidak ditemukan",
+          });
         }
       } finally {
         if (!cancelled) setLoadingDetail(false);
@@ -182,7 +282,7 @@ function WatchPage() {
     return () => {
       cancelled = true;
     };
-  }, [series, seriesId]);
+  }, [series, seriesId, detectedProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,34 +291,63 @@ function WatchPage() {
       setLoadingEpisodes(true);
       setError("");
       try {
-        const list = await fetchEpisodes(seriesId);
-        if (!cancelled) setEpisodes(list);
+        // Jika provider diketahui, gunakan fetch by provider
+        if (detectedProvider) {
+          const list = await fetchEpisodesByProvider(
+            seriesId,
+            detectedProvider,
+            seriesDetail,
+          );
+          if (!cancelled) setEpisodes(list);
+        } else {
+          // Fallback
+          const list = await fetchEpisodes(seriesId, {}, seriesDetail);
+          if (!cancelled) setEpisodes(list);
+        }
       } catch (err) {
         if (!cancelled) {
-          setEpisodes([]);
-          setError(err instanceof Error ? err.message : "Gagal memuat episode.");
+          if (!episodesRef.current.length) {
+            setEpisodes([]);
+          }
+          setError(
+            err instanceof Error ? err.message : "Gagal memuat episode.",
+          );
         }
       } finally {
         if (!cancelled) setLoadingEpisodes(false);
       }
     }
 
+    // Jalankan fetch episodes (sama untuk navigation dan direct URL)
     run();
 
     return () => {
       cancelled = true;
     };
-  }, [seriesId]);
+  }, [
+    seriesId,
+    detectedProvider,
+    seriesDetail?.firstChapterId,
+    seriesDetail?.totalEpisodes,
+  ]);
 
   const canAutoNext = useMemo(() => {
     if (!selectedEpisode) return false;
-    return episodes.some((episode) => Number(episode.episode) > Number(selectedEpisode.episode));
+    return episodes.some(
+      (episode) => Number(episode.episode) > Number(selectedEpisode.episode),
+    );
   }, [episodes, selectedEpisode]);
 
-  async function handleWatch(episode, preferredQuality = null, shouldAutoPlay = false) {
+  async function handleWatch(
+    episode,
+    preferredQuality = null,
+    shouldAutoPlay = false,
+  ) {
     setSelectedEpisode(episode);
     sourceRetryRef.current = new Set(
-      [...sourceRetryRef.current].filter((key) => !key.startsWith(`${episode.id}|`)),
+      [...sourceRetryRef.current].filter(
+        (key) => !key.startsWith(`${episode.id}|`),
+      ),
     );
     setLoadingStream(true);
     setError("");
@@ -227,13 +356,25 @@ function WatchPage() {
     try {
       const preferredSource =
         preferredQuality && preferredQuality !== "auto"
-          ? episode?.sources?.find((source) => String(source.quality) === String(preferredQuality))
+          ? episode?.sources?.find(
+              (source) => String(source.quality) === String(preferredQuality),
+            )
           : null;
-      const defaultSource = episode?.sources?.find((source) => source.isDefault) || episode?.sources?.[0];
+      const defaultSource =
+        episode?.sources?.find((source) => source.isDefault) ||
+        episode?.sources?.[0];
       const activeSource = preferredSource || defaultSource;
-      const url = activeSource?.url || episode.streamUrl || (await fetchStream(seriesId, episode.episode));
+      const url =
+        activeSource?.url ||
+        episode.streamUrl ||
+        (await fetchStream(seriesId, episode.episode, {
+          vid: episode.vid,
+          provider: detectedProvider,
+        }));
       setStreamUrl(url);
-      setQuality(activeSource ? String(activeSource.quality || "auto") : "auto");
+      setQuality(
+        activeSource ? String(activeSource.quality || "auto") : "auto",
+      );
       if (shouldAutoPlay) {
         setTimeout(() => {
           tryAutoPlay();
@@ -246,15 +387,17 @@ function WatchPage() {
       setLoadingStream(false);
     }
   }
-
   function applyQuality(nextQuality) {
     setQuality(nextQuality);
     if (!selectedEpisode?.sources?.length) return;
 
     const selectedSource =
       nextQuality === "auto"
-        ? selectedEpisode.sources.find((source) => source.isDefault) || selectedEpisode.sources[0]
-        : selectedEpisode.sources.find((source) => String(source.quality) === String(nextQuality));
+        ? selectedEpisode.sources.find((source) => source.isDefault) ||
+          selectedEpisode.sources[0]
+        : selectedEpisode.sources.find(
+            (source) => String(source.quality) === String(nextQuality),
+          );
 
     if (!selectedSource?.url || selectedSource.url === streamUrl) return;
     const currentTime = playerRef.current?.currentTime ?? 0;
@@ -264,13 +407,15 @@ function WatchPage() {
     requestAnimationFrame(() => {
       if (!playerRef.current) return;
       playerRef.current.currentTime = currentTime;
-      if (shouldContinue) playerRef.current.play().catch(() => { });
+      if (shouldContinue) playerRef.current.play().catch(() => {});
     });
   }
 
   function handleEnded() {
     if (!selectedEpisode) return;
-    const currentIndex = episodes.findIndex((episode) => episode.id === selectedEpisode.id);
+    const currentIndex = episodes.findIndex(
+      (episode) => episode.id === selectedEpisode.id,
+    );
     if (currentIndex === -1) return;
     const nextEpisode = episodes[currentIndex + 1];
     if (!nextEpisode) return;
@@ -305,11 +450,17 @@ function WatchPage() {
       if (!selectedEpisode?.sources?.length) return [];
       const preferredSource =
         quality && quality !== "auto"
-          ? selectedEpisode.sources.find((source) => String(source.quality) === String(quality))
-          : selectedEpisode.sources.find((source) => source.isDefault) || selectedEpisode.sources[0];
+          ? selectedEpisode.sources.find(
+              (source) => String(source.quality) === String(quality),
+            )
+          : selectedEpisode.sources.find((source) => source.isDefault) ||
+            selectedEpisode.sources[0];
       if (!preferredSource) return [];
 
-      const urls = [preferredSource.url, ...(preferredSource.backupUrls || [])].filter(Boolean);
+      const urls = [
+        preferredSource.url,
+        ...(preferredSource.backupUrls || []),
+      ].filter(Boolean);
       const seen = new Set();
       return urls.filter((url) => {
         if (seen.has(url)) return false;
@@ -337,7 +488,11 @@ function WatchPage() {
       refreshRetryRef.current.add(episodeKey);
 
       try {
-        const freshUrl = await fetchStream(seriesId, selectedEpisode.episode, { forceRefresh: true });
+        const freshUrl = await fetchStream(seriesId, selectedEpisode.episode, {
+          forceRefresh: true,
+          vid: selectedEpisode?.vid,
+          provider: detectedProvider,
+        });
         if (!freshUrl || freshUrl === streamUrl) return;
         setStreamUrl(freshUrl);
         shouldAutoPlayRef.current = true;
@@ -388,8 +543,13 @@ function WatchPage() {
     const list = node?.qualities;
     if (!node || !list) return;
 
-    const { addSymbol, resetSymbol, selectSymbol, setReadonlySymbol, setAutoSymbol } =
-      resolveQualityListSymbols(list);
+    const {
+      addSymbol,
+      resetSymbol,
+      selectSymbol,
+      setReadonlySymbol,
+      setAutoSymbol,
+    } = resolveQualityListSymbols(list);
     if (!addSymbol || !resetSymbol || !selectSymbol) return;
 
     const syncQualityMenu = () => {
@@ -415,12 +575,16 @@ function WatchPage() {
         const activeSource =
           quality === "auto"
             ? sources.find((source) => source.isDefault) || sources[0]
-            : sources.find((source) => String(source.quality) === String(quality)) ||
-            sources.find((source) => source.isDefault) ||
-            sources[0];
+            : sources.find(
+                (source) => String(source.quality) === String(quality),
+              ) ||
+              sources.find((source) => source.isDefault) ||
+              sources[0];
 
         const activeHeight = Number(activeSource?.quality) || 0;
-        const activeQualityItem = list.toArray().find((item) => Number(item.height) === activeHeight);
+        const activeQualityItem = list
+          .toArray()
+          .find((item) => Number(item.height) === activeHeight);
         if (activeQualityItem) {
           list[selectSymbol](activeQualityItem, true);
         }
@@ -467,7 +631,10 @@ function WatchPage() {
     node.addEventListener("media-quality-change-request", onQualityRequest);
     return () => {
       list.removeEventListener("change", onQualityChanged);
-      node.removeEventListener("media-quality-change-request", onQualityRequest);
+      node.removeEventListener(
+        "media-quality-change-request",
+        onQualityRequest,
+      );
     };
   }, [quality, selectedEpisode, streamUrl]);
 
@@ -476,19 +643,55 @@ function WatchPage() {
       <header className="wp-header">
         <h2>{seriesDetail?.title || `Series ${seriesId}`}</h2>
         <Link className="wp-back-btn" to="/for-you">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M19 12H5" />
+            <path d="M12 19l-7-7 7-7" />
+          </svg>
           Kembali
         </Link>
       </header>
 
-      {error && <p className="error-banner">{error}</p>}
+      {error && (
+        <p className="error-banner">
+          {typeof error === "string" ? error : JSON.stringify(error)}
+        </p>
+      )}
       {loadingDetail && <p className="muted">Memuat detail judul...</p>}
 
       <div className="wp-content">
         {seriesDetail ? (
           <section className="wp-detail-card">
             <div className="wp-detail-cover">
-              {seriesDetail.poster ? <img src={seriesDetail.poster} alt={seriesDetail.title} /> : null}
+              {seriesDetail.poster ? (
+                seriesDetail.source === "melolo" ? (
+                  <HeicImage
+                    src={seriesDetail.poster}
+                    alt={seriesDetail.title}
+                  />
+                ) : (
+                  <img
+                    src={seriesDetail.poster}
+                    alt={seriesDetail.title}
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                      e.target.parentElement.classList.add("no-poster");
+                    }}
+                  />
+                )
+              ) : (
+                <div className="poster-placeholder">
+                  <span>🎬</span>
+                </div>
+              )}
             </div>
             <div className="wp-detail-body">
               <h3>{seriesDetail.title}</h3>
@@ -496,21 +699,49 @@ function WatchPage() {
               {seriesDetail?.genres?.length ? (
                 <div className="wp-tags">
                   {seriesDetail.genres.map((genre) => (
-                    <span className="wp-tag" key={genre}>{genre}</span>
+                    <span className="wp-tag" key={genre}>
+                      {genre}
+                    </span>
                   ))}
                 </div>
               ) : null}
 
-              <p className="wp-synopsis">{seriesDetail.synopsis || "Sinopsis belum tersedia."}</p>
+              <p className="wp-synopsis">
+                {seriesDetail.synopsis || "Sinopsis belum tersedia."}
+              </p>
 
               <div className="wp-meta">
                 <span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
                   {seriesDetail.rating || "-"}
                 </span>
                 <span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2" /><polyline points="17 2 12 7 7 2" /></svg>
-                  Total Episode: {seriesDetail.totalEpisodes || episodes.length || "-"}
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                    <polyline points="17 2 12 7 7 2" />
+                  </svg>
+                  Total Episode:{" "}
+                  {seriesDetail.totalEpisodes || episodes.length || "-"}
                 </span>
               </div>
             </div>
@@ -519,7 +750,12 @@ function WatchPage() {
 
         <section className="wp-player-section">
           {loadingStream ? (
-            <p className="muted" style={{ padding: "2rem", textAlign: "center", color: "#888" }}>Menyiapkan stream...</p>
+            <p
+              className="muted"
+              style={{ padding: "2rem", textAlign: "center", color: "#888" }}
+            >
+              Menyiapkan stream...
+            </p>
           ) : streamUrl ? (
             <>
               <media-player
@@ -534,7 +770,9 @@ function WatchPage() {
                 muted={false}
               >
                 <media-outlet
-                  key={`${selectedEpisode?.id || "idle"}:${(selectedEpisode?.subtitles || [])
+                  key={`${selectedEpisode?.id || "idle"}:${(
+                    selectedEpisode?.subtitles || []
+                  )
                     .map((track) => track.url)
                     .join("|")}`}
                 >
@@ -554,12 +792,19 @@ function WatchPage() {
               </media-player>
             </>
           ) : (
-            <p className="muted" style={{ padding: "2rem", textAlign: "center", color: "#888" }}>Pilih episode untuk mulai menonton.</p>
+            <p
+              className="muted"
+              style={{ padding: "2rem", textAlign: "center", color: "#888" }}
+            >
+              Pilih episode untuk mulai menonton.
+            </p>
           )}
 
           {selectedEpisode ? (
             <div className="wp-player-tools">
-              <span>{canAutoNext ? "Auto-next aktif" : "Episode terakhir"}</span>
+              <span>
+                {canAutoNext ? "Auto-next aktif" : "Episode terakhir"}
+              </span>
               <span style={{ opacity: 0.7 }}>
                 {selectedEpisode.subtitles?.length
                   ? "Subtitle tersedia di player."
@@ -571,18 +816,26 @@ function WatchPage() {
 
         <section className="wp-episodes-section">
           <h3>Eps</h3>
-          {loadingEpisodes ? (
+          {loadingEpisodes && !episodes.length ? (
             <p className="muted">Memuat episode...</p>
           ) : episodes.length ? (
             <div className="wp-episode-list">
               {episodes.map((episode) => (
                 <button
                   key={episode.id}
-                  className={selectedEpisode?.id === episode.id ? "wp-episode-btn active" : "wp-episode-btn"}
+                  className={
+                    selectedEpisode?.id === episode.id
+                      ? "wp-episode-btn active"
+                      : "wp-episode-btn"
+                  }
                   onClick={() => handleWatch(episode)}
                 >
                   <span>Episode {episode.episode}</span>
-                  <small>{episode.duration || episode.title || `Eps ${episode.episode}`}</small>
+                  <small>
+                    {episode.duration ||
+                      episode.title ||
+                      `Eps ${episode.episode}`}
+                  </small>
                 </button>
               ))}
             </div>

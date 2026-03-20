@@ -1,10 +1,32 @@
 import { useNavigate } from "react-router-dom";
+import HeicImage from "./HeicImage";
 
 function CatalogPage({ title, items = [], controls }) {
   const navigate = useNavigate();
 
   function handleOpenSeries(series) {
-    navigate(`/watch/${encodeURIComponent(series.id)}`, { state: { series } });
+    // Simpan data series lengkap di localStorage untuk referensi saat refresh
+    try {
+      const seriesCache = JSON.parse(
+        localStorage.getItem("seriesCache") || "{}",
+      );
+      seriesCache[series.id] = series;
+      localStorage.setItem("seriesCache", JSON.stringify(seriesCache));
+
+      // Simpan juga source mapping (untuk backward compatibility)
+      const sourceMap = JSON.parse(
+        localStorage.getItem("seriesSourceMap") || "{}",
+      );
+      sourceMap[series.id] = series.source;
+      localStorage.setItem("seriesSourceMap", JSON.stringify(sourceMap));
+    } catch (e) {
+      // Ignore storage error
+    }
+    // Navigasi dengan provider di URL: /watch/dramabox/:id atau /watch/melolo/:id
+    const provider = series.source === "melolo" ? "melolo" : "dramabox";
+    navigate(`/watch/${provider}/${encodeURIComponent(series.id)}`, {
+      state: { series },
+    });
   }
 
   return (
@@ -23,9 +45,23 @@ function CatalogPage({ title, items = [], controls }) {
               onClick={() => handleOpenSeries(series)}
             >
               <div className="poster-wrap">
-                {series.poster ? (
-                  <img src={series.poster} alt={series.title} loading="lazy" />
-                ) : null}
+                {series.source === "melolo" ? (
+                  <HeicImage
+                    src={series.poster}
+                    alt={series.title}
+                    loading="lazy"
+                  />
+                ) : (
+                  <img
+                    src={series.poster || ""}
+                    alt={series.title}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                      e.target.parentElement.classList.add("no-poster");
+                    }}
+                  />
+                )}
                 {series.source && series.source !== "unknown" && (
                   <div className="source-badge" data-source={series.source}>
                     {series.source === "dramabox" ? (

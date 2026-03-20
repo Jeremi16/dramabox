@@ -17,6 +17,7 @@ function App() {
         <Route path="/rank" element={<RankPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/watch/:seriesId" element={<WatchPage />} />
+        <Route path="/watch/:provider/:seriesId" element={<WatchPage />} />
       </Route>
     </Routes>
   );

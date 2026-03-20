@@ -1,4 +1,11 @@
 import { detectSource } from "./sourceDetector";
+
+// Helper untuk URL gambar - gunakan URL asli tanpa modifikasi
+function proxyImageUrl(url, source) {
+  // Return URL asli tanpa perubahan
+  return url;
+}
+
 export function findArray(payload) {
   if (!payload) return [];
   if (Array.isArray(payload)) return payload;
@@ -124,13 +131,8 @@ export function normalizeSeries(item, index, sourceOverride) {
   // Gunakan sourceOverride jika tersedia, jika tidak gunakan deteksi dari ID
   const source = sourceOverride || detectSource(id);
 
-  // Untuk Melolo, tambahkan prefix "42" ke ID agar bisa dideteksi dengan benar
-  // ID Melolo asli tidak diawali dengan "42", jadi kita perlu modifikasi
-  const normalizedId =
-    source === "melolo" && !String(id).startsWith("42") ? `42${id}` : id;
-
   return {
-    id: String(normalizedId),
+    id: String(id),
     source,
     title,
     synopsis:
@@ -140,15 +142,19 @@ export function normalizeSeries(item, index, sourceOverride) {
       item?.description ||
       item?.overview ||
       "",
-    poster:
-      item?.coverWap ||
-      item?.thumb_url ||
-      item?.cover ||
-      item?.poster ||
-      item?.image ||
-      item?.thumbnail ||
-      item?.thumb ||
-      "",
+    poster: proxyImageUrl(
+      // Untuk Melolo, prioritaskan thumb_url
+      (source === "melolo" ? item?.thumb_url : null) ||
+        item?.coverWap ||
+        item?.thumb_url ||
+        item?.cover ||
+        item?.poster ||
+        item?.image ||
+        item?.thumbnail ||
+        item?.thumb ||
+        "",
+      source,
+    ),
     rating: item?.rating || item?.score || item?.imdb || null,
     status: item?.status || item?.show_creation_status || "",
     totalEpisodes:
@@ -159,6 +165,9 @@ export function normalizeSeries(item, index, sourceOverride) {
       item?.chapters ||
       item?.chapter_count ||
       null,
+    // Melolo specific: vid untuk episode 1
+    firstChapterId: item?.first_chapter_item_id || null,
+    lastChapterId: item?.last_chapter_item_id || null,
     genres: genreList
       .map((genre) => {
         // Handle object genres (like {tagId: 1364, tagName: "Mafia"})

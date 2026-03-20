@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchCatalogCombined } from "../lib/apiClient";
 import { GridSkeleton } from "../components/skeletons/Skeleton";
@@ -21,8 +21,17 @@ function RankPage() {
     },
   });
 
-  // Flatten semua pages menjadi satu array
-  const items = data?.pages?.flat() ?? [];
+  // Flatten dan deduplicate semua pages menjadi satu array
+  const items = useMemo(() => {
+    const allItems = data?.pages?.flat() ?? [];
+    const uniqueMap = new Map();
+    allItems.forEach((item) => {
+      if (!uniqueMap.has(item.id)) {
+        uniqueMap.set(item.id, item);
+      }
+    });
+    return Array.from(uniqueMap.values());
+  }, [data?.pages]);
 
   // Ref untuk observer
   const observerRef = useRef(null);

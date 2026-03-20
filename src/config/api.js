@@ -1,3 +1,5 @@
+const isDev = import.meta.env.DEV;
+
 export const API_CONFIG = {
   dramabox: {
     baseUrl:
@@ -6,9 +8,12 @@ export const API_CONFIG = {
     token: "",
   },
   melolo: {
-    baseUrl:
-      import.meta.env.VITE_MELOLO_API_BASE_URL ||
-      "https://melolo-api-azure.vercel.app",
+    // Saat development, gunakan proxy Vite untuk bypass CORS
+    // Saat production, gunakan URL langsung
+    baseUrl: isDev
+      ? "/melolo-api"
+      : import.meta.env.VITE_MELOLO_API_BASE_URL ||
+        "https://melolo-api-azure.vercel.app",
     token: "",
   },
 };

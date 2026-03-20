@@ -26,12 +26,16 @@ function CatalogPage({ title, items = [], controls }) {
                 {series.poster ? (
                   <img src={series.poster} alt={series.title} loading="lazy" />
                 ) : null}
-              {series.source && series.source !== "unknown" && (
+                {series.source && series.source !== "unknown" && (
                   <div className="source-badge" data-source={series.source}>
-                    {series.source === "dramabox" ? "DramaBox" : "Melolo"}
+                    {series.source === "dramabox" ? (
+                      <img src="/image/dramabox-logo.png" alt="DramaBox" />
+                    ) : (
+                      <img src="/image/melolo-logo.png" alt="Melolo" />
+                    )}
                   </div>
                 )}
-                </div>
+              </div>
               <div className="series-card-content">
                 <h3>{series.title}</h3>
                 <p>{series.synopsis || "Tidak ada deskripsi."}</p>

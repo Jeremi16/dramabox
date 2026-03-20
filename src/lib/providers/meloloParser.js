@@ -88,7 +88,11 @@ function normalizeMeloloSeriesItem(item, index = 0) {
     id: String(id),
     source: SOURCE_MELOLO,
     title:
-      item?.book_name || item?.bookName || item?.series_title || item?.title || "Untitled Series",
+      item?.book_name ||
+      item?.bookName ||
+      item?.series_title ||
+      item?.title ||
+      "Untitled Series",
     synopsis:
       item?.series_intro ||
       item?.book_intro ||
@@ -107,13 +111,16 @@ function normalizeMeloloSeriesItem(item, index = 0) {
     rating:
       item?.rating ||
       item?.score ||
-      (toPositiveInt(item?.followed_cnt) ? `${item.followed_cnt} followers` : null),
+      (toPositiveInt(item?.followed_cnt)
+        ? `${item.followed_cnt} followers`
+        : null),
     status: item?.series_status || item?.status || "",
     totalEpisodes:
       toPositiveInt(item?.episode_cnt) ||
       toPositiveInt(item?.episode_count) ||
       toPositiveInt(item?.serial_count) ||
-      (episodesData.length || null),
+      episodesData.length ||
+      null,
     firstChapterId: episodesData[0]?.vid || null,
     lastChapterId: episodesData[episodesData.length - 1]?.vid || null,
     genres: Array.from(new Set(genres)),
@@ -139,7 +146,10 @@ export function parseMeloloSearchPayload(payload) {
 
 export function extractMeloloVideoData(payload) {
   if (!payload || typeof payload !== "object") return null;
-  if (payload?.data?.video_data && typeof payload.data.video_data === "object") {
+  if (
+    payload?.data?.video_data &&
+    typeof payload.data.video_data === "object"
+  ) {
     return payload.data.video_data;
   }
   if (payload?.video_data && typeof payload.video_data === "object") {
@@ -148,7 +158,9 @@ export function extractMeloloVideoData(payload) {
   if (
     payload?.data &&
     typeof payload.data === "object" &&
-    (payload.data.series_id_str || payload.data.series_title || payload.data.video_list)
+    (payload.data.series_id_str ||
+      payload.data.series_title ||
+      payload.data.video_list)
   ) {
     return payload.data;
   }
@@ -180,7 +192,10 @@ export function parseMeloloSeriesDetailPayload(payload, fallbackSeriesId) {
   return normalized;
 }
 
-export function parseMeloloEpisodesFromSeriesDetail(seriesDetail, fallbackSeriesId) {
+export function parseMeloloEpisodesFromSeriesDetail(
+  seriesDetail,
+  fallbackSeriesId,
+) {
   const list = Array.isArray(seriesDetail?.episodesData)
     ? seriesDetail.episodesData
     : [];
@@ -189,7 +204,9 @@ export function parseMeloloEpisodesFromSeriesDetail(seriesDetail, fallbackSeries
   return list
     .map((episode, index) => ({
       ...episode,
-      id: String(episode.id || episode.vid || `${fallbackSeriesId}-${index + 1}`),
+      id: String(
+        episode.id || episode.vid || `${fallbackSeriesId}-${index + 1}`,
+      ),
       episode: toPositiveInt(episode.episode, index + 1),
       vid: String(episode.vid || fallbackSeriesId),
     }))
@@ -204,7 +221,8 @@ export function parseMeloloStreamUrl(payload) {
     payload?.backup_url ||
     "";
   if (typeof directUrl === "string" && directUrl.startsWith("http")) {
-    return directUrl;
+    // Force HTTPS untuk menghindari Mixed Content error
+    return directUrl.replace(/^http:\/\//, "https://");
   }
   return findStringUrl(payload);
 }

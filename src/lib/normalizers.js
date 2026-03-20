@@ -92,6 +92,7 @@ export function findStringUrl(payload) {
 export function normalizeSeries(item, index, sourceOverride) {
   const title =
     item?.bookName ||
+    item?.book_name ||
     item?.name ||
     item?.title ||
     item?.series_title ||
@@ -100,6 +101,7 @@ export function normalizeSeries(item, index, sourceOverride) {
     "Untitled Series";
   const id =
     item?.bookId ||
+    item?.book_id ||
     item?.id ||
     item?.series_id ||
     item?.seriesId ||
@@ -122,18 +124,25 @@ export function normalizeSeries(item, index, sourceOverride) {
   // Gunakan sourceOverride jika tersedia, jika tidak gunakan deteksi dari ID
   const source = sourceOverride || detectSource(id);
 
+  // Untuk Melolo, tambahkan prefix "42" ke ID agar bisa dideteksi dengan benar
+  // ID Melolo asli tidak diawali dengan "42", jadi kita perlu modifikasi
+  const normalizedId =
+    source === "melolo" && !String(id).startsWith("42") ? `42${id}` : id;
+
   return {
-    id: String(id),
+    id: String(normalizedId),
     source,
     title,
     synopsis:
       item?.introduction ||
+      item?.abstract ||
       item?.synopsis ||
       item?.description ||
       item?.overview ||
       "",
     poster:
       item?.coverWap ||
+      item?.thumb_url ||
       item?.cover ||
       item?.poster ||
       item?.image ||
@@ -141,9 +150,10 @@ export function normalizeSeries(item, index, sourceOverride) {
       item?.thumb ||
       "",
     rating: item?.rating || item?.score || item?.imdb || null,
-    status: item?.status || "",
+    status: item?.status || item?.show_creation_status || "",
     totalEpisodes:
       item?.chapterCount ||
+      item?.serial_count ||
       item?.total_episodes ||
       item?.episode_count ||
       item?.chapters ||

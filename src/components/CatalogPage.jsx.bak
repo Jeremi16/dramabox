@@ -26,12 +26,7 @@ function CatalogPage({ title, items = [], controls }) {
                 {series.poster ? (
                   <img src={series.poster} alt={series.title} loading="lazy" />
                 ) : null}
-              {series.source && series.source !== "unknown" && (
-                  <div className="source-badge" data-source={series.source}>
-                    {series.source === "dramabox" ? "DramaBox" : "Melolo"}
-                  </div>
-                )}
-                </div>
+              </div>
               <div className="series-card-content">
                 <h3>{series.title}</h3>
                 <p>{series.synopsis || "Tidak ada deskripsi."}</p>

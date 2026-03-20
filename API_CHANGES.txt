@@ -1,0 +1,4 @@
+# API Migration Complete
+
+Base URL changed to: https://lectura.harch.site/api/dramabox
+Updated endpoints: recommend, home, vip, search, detail, chapters, stream

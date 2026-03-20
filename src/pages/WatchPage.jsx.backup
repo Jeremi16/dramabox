@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { API_CONFIG } from "../config/api";
 import { fetchEpisodes, fetchSeriesDetail, fetchStream } from "../lib/apiClient";
-import { useContinueWatching } from "../hooks/useContinueWatching";
 import "./WatchPage.css";
 
 function estimateBitrate(height) {
@@ -125,18 +124,6 @@ function WatchPage() {
   const [loadingDetail, setLoadingDetail] = useState(!series);
   const [error, setError] = useState("");
 
-  // Continue watching feature
-  useContinueWatching(
-    seriesId, 
-    selectedEpisode?.episode, 
-    {
-      title: seriesDetail?.title,
-      poster: seriesDetail?.poster,
-      totalEpisodes: episodes.length
-    },
-    playerRef
-  );
-
   useEffect(() => {
     refreshRetryRef.current = new Set();
     sourceRetryRef.current = new Set();
@@ -146,31 +133,15 @@ function WatchPage() {
     let cancelled = false;
 
     async function run() {
-      // If we already have series data from navigation state, use it
-      if (series && series.id === seriesId) {
-        setSeriesDetail(series);
-        setLoadingDetail(false);
-        return;
-      }
-
       setLoadingDetail(true);
       try {
         const detail = await fetchSeriesDetail(seriesId);
         if (!cancelled) {
-          setSeriesDetail((prev) => {
-            // Merge with existing data, prioritizing new data
-            return { ...prev, ...detail };
-          });
+          setSeriesDetail((prev) => ({ ...prev, ...detail }));
         }
-      } catch (error) {
-        console.error('Error fetching detail:', error);
-        if (!cancelled) {
-          // If we have series from state, keep it
-          if (series) {
-            setSeriesDetail(series);
-          } else {
-            setSeriesDetail({ id: seriesId, title: 'Loading...' });
-          }
+      } catch {
+        if (!cancelled && !series) {
+          setSeriesDetail(null);
         }
       } finally {
         if (!cancelled) setLoadingDetail(false);

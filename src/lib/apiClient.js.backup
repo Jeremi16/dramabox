@@ -73,9 +73,9 @@ export async function apiRequest(path, options = {}) {
 
 export async function fetchCatalog(kind, page = 1, extraParams = {}) {
   const endpointMap = {
-    foryou: "api/recommend",
-    new: "api/home",
-    rank: "api/vip",
+    foryou: "foryou",
+    new: "latest",
+    rank: "trending",
   };
   const endpoint = endpointMap[kind] || kind;
 
@@ -88,69 +88,51 @@ export async function fetchCatalog(kind, page = 1, extraParams = {}) {
 }
 
 export async function searchCatalog(query) {
-  const payload = await apiRequest(`/api/search?keyword=${encodeURIComponent(query)}`);
+  const payload = await tryPaths([
+    `/search?query=${encodeURIComponent(query)}`,
+    `/search?q=${encodeURIComponent(query)}`,
+    `/search/${encodeURIComponent(query)}`,
+  ]);
   return findArray(payload).map(normalizeSeries).filter((item) => item.title);
 }
 
 export async function fetchEpisodes(seriesId, options = {}) {
-  const payload = await apiRequest(`/api/chapters/${encodeURIComponent(seriesId)}`, options);
+  const payload = await apiRequest(`/allepisode?bookId=${encodeURIComponent(seriesId)}`, options);
   return findArray(payload)
     .map(normalizeEpisode)
     .sort((a, b) => a.episode - b.episode);
 }
 
 export async function fetchSeriesDetail(seriesId) {
-  try {
-    // Try to get detail from API
-    const payload = await apiRequest(`/api/detail/${encodeURIComponent(seriesId)}/v2`);
+  const payload = await tryPaths([
+    `/detail?bookId=${encodeURIComponent(seriesId)}`,
+    `/detail/${encodeURIComponent(seriesId)}`,
+  ]);
 
-    // Check if we have data in payload.data
-    if (payload && payload.data && typeof payload.data === "object") {
-      // If data has bookId, use it directly
-      if (payload.data.bookId || payload.data.bookName) {
-        return normalizeSeries(payload.data, 0);
-      }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    if (payload.bookId || payload.bookName || payload.coverWap || payload.introduction) {
+      return normalizeSeries(payload, 0);
     }
 
-    // Check if payload itself has the data
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      if (payload.bookId || payload.bookName || payload.coverWap || payload.introduction) {
-        return normalizeSeries(payload, 0);
-      }
-    }
-
-    // Try to find in nested structures
     const nested =
-      payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+      payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
         ? payload.data
-        : payload?.result && typeof payload.result === "object" && !Array.isArray(payload.result)
+        : payload.result && typeof payload.result === "object" && !Array.isArray(payload.result)
           ? payload.result
           : null;
 
-    if (nested && (nested.bookId || nested.bookName)) {
-      return normalizeSeries(nested, 0);
-    }
-
-    // Try to find in array
-    const fromArray = findArray(payload);
-    if (fromArray.length) return normalizeSeries(fromArray[0], 0);
-
-    // If all fails, return empty but valid object
-    console.warn('No detail found for seriesId:', seriesId);
-    return normalizeSeries({ bookId: seriesId }, 0);
-  } catch (error) {
-    console.error('Error fetching series detail:', error);
-    // Return minimal data so the page doesn't break
-    return normalizeSeries({ bookId: seriesId }, 0);
+    if (nested) return normalizeSeries(nested, 0);
   }
+
+  const fromArray = findArray(payload);
+  if (fromArray.length) return normalizeSeries(fromArray[0], 0);
+  return normalizeSeries({}, 0);
 }
 
 export async function fetchStream(seriesId, episodeNumber, options = {}) {
-  const payload = await apiRequest(
-    `/api/stream?bookId=${encodeURIComponent(seriesId)}&chapter=${episodeNumber}`,
-    options
-  );
-  const url = findStringUrl(payload);
+  const episodes = await fetchEpisodes(seriesId, options);
+  const target = episodes.find((item) => Number(item.episode) === Number(episodeNumber));
+  const url = target?.streamUrl || findStringUrl(target);
   if (!url) throw new Error("Link stream tidak ditemukan pada respons API.");
   return url;
 }

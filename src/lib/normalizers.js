@@ -1,7 +1,23 @@
+import { detectSource } from "./sourceDetector";
 export function findArray(payload) {
   if (!payload) return [];
   if (Array.isArray(payload)) return payload;
   if (typeof payload !== "object") return [];
+
+  // Special handling for VIP endpoint structure
+  if (payload.data?.data?.columnVoList) {
+    const columns = payload.data.data.columnVoList;
+    if (Array.isArray(columns) && columns.length > 0) {
+      // Flatten all bookList from all columns
+      const allBooks = [];
+      for (const column of columns) {
+        if (Array.isArray(column.bookList)) {
+          allBooks.push(...column.bookList);
+        }
+      }
+      if (allBooks.length > 0) return allBooks;
+    }
+  }
 
   const preferredKeys = [
     "data",
@@ -9,6 +25,8 @@ export function findArray(payload) {
     "result",
     "items",
     "list",
+    "bookList",
+    "columnVoList",
     "series",
     "chapters",
     "episodes",
@@ -74,8 +92,8 @@ export function findStringUrl(payload) {
 export function normalizeSeries(item, index) {
   const title =
     item?.bookName ||
-    item?.title ||
     item?.name ||
+    item?.title ||
     item?.series_title ||
     item?.drama_title ||
     item?.series_name ||
@@ -93,21 +111,28 @@ export function normalizeSeries(item, index) {
     ? item.genres
     : Array.isArray(item?.tags)
       ? item.tags
-    : typeof item?.genres === "string"
-      ? item.genres.split(",")
-      : typeof item?.genre === "string"
-        ? item.genre.split(",")
-        : [];
+      : Array.isArray(item?.tagV3s)
+        ? item.tagV3s
+        : typeof item?.genres === "string"
+          ? item.genres.split(",")
+          : typeof item?.genre === "string"
+            ? item.genre.split(",")
+            : [];
 
   return {
     id: String(id),
+    source: detectSource(id),
     title,
     synopsis:
-      item?.introduction || item?.synopsis || item?.description || item?.overview || "",
+      item?.introduction ||
+      item?.synopsis ||
+      item?.description ||
+      item?.overview ||
+      "",
     poster:
       item?.coverWap ||
-      item?.poster ||
       item?.cover ||
+      item?.poster ||
       item?.image ||
       item?.thumbnail ||
       item?.thumb ||
@@ -121,18 +146,36 @@ export function normalizeSeries(item, index) {
       item?.chapters ||
       item?.chapter_count ||
       null,
-    genres: genreList.map((genre) => String(genre).trim()).filter(Boolean),
+    genres: genreList
+      .map((genre) => {
+        // Handle object genres (like {tagId: 1364, tagName: "Mafia"})
+        if (typeof genre === "object" && genre !== null) {
+          return genre.tagName || genre.name || genre.genre || String(genre);
+        }
+        return String(genre);
+      })
+      .map((g) => g.trim())
+      .filter(Boolean),
   };
 }
 
 export function normalizeEpisode(item, index) {
+  function isSubtitleUrl(value) {
+    const url = String(value || "").trim();
+    if (!/^https?:\/\//i.test(url)) return false;
+    return /\.(srt|vtt|ass|ssa)(\?|#|$)/i.test(url);
+  }
+
   function inferLang(value) {
-    const input = String(value || "").trim().toLowerCase();
+    const input = String(value || "")
+      .trim()
+      .toLowerCase();
     if (!input) return { lang: "id", label: "Indonesian" };
     if (input === "id" || input === "in" || input.includes("indo")) {
       return { lang: "id", label: "Indonesian" };
     }
-    if (input === "en" || input.includes("eng")) return { lang: "en", label: "English" };
+    if (input === "en" || input.includes("eng"))
+      return { lang: "en", label: "English" };
     return { lang: input.slice(0, 2), label: String(value) };
   }
 
@@ -141,7 +184,7 @@ export function normalizeEpisode(item, index) {
 
     if (typeof payload === "string") {
       const url = payload.trim();
-      if (/^https?:\/\//i.test(url) && /\.srt(\?|#|$)/i.test(url)) {
+      if (isSubtitleUrl(url)) {
         bucket.push({ url, kind: "subtitles" });
       }
       return;
@@ -162,7 +205,7 @@ export function normalizeEpisode(item, index) {
       payload.file ||
       payload.path ||
       "";
-    if (typeof objectUrl === "string" && /^https?:\/\//i.test(objectUrl) && /\.srt(\?|#|$)/i.test(objectUrl)) {
+    if (typeof objectUrl === "string" && isSubtitleUrl(objectUrl)) {
       const langMeta = inferLang(
         payload.lang ||
           payload.language ||
@@ -204,16 +247,19 @@ export function normalizeEpisode(item, index) {
     ? item.cdnList.find((cdn) => cdn?.isDefault) || item.cdnList[0]
     : null;
   const defaultVideo = Array.isArray(defaultCdn?.videoPathList)
-    ? defaultCdn.videoPathList.find((video) => video?.isDefault) || defaultCdn.videoPathList[0]
+    ? defaultCdn.videoPathList.find((video) => video?.isDefault) ||
+      defaultCdn.videoPathList[0]
     : null;
   const allSources = Array.isArray(item?.cdnList)
     ? item.cdnList
         .flatMap((cdn, cdnIndex) =>
-          (Array.isArray(cdn?.videoPathList) ? cdn.videoPathList : []).map((video) => ({
-            ...video,
-            __cdnIndex: cdnIndex,
-            __cdnDefault: Boolean(cdn?.isDefault),
-          })),
+          (Array.isArray(cdn?.videoPathList) ? cdn.videoPathList : []).map(
+            (video) => ({
+              ...video,
+              __cdnIndex: cdnIndex,
+              __cdnDefault: Boolean(cdn?.isDefault),
+            }),
+          ),
         )
         .map((video) => ({
           quality: Number(video?.quality) || 0,
@@ -292,10 +338,17 @@ export function normalizeEpisode(item, index) {
   const episodeNumber = Number(rawEpisode);
 
   return {
-    id: String(item?.chapterId || item?.id || item?.episode_id || `${rawEpisode}-${index}`),
+    id: String(
+      item?.chapterId ||
+        item?.id ||
+        item?.episode_id ||
+        `${rawEpisode}-${index}`,
+    ),
     episode: Number.isFinite(episodeNumber) ? episodeNumber : index + 1,
-    title: item?.chapterName || item?.title || item?.name || `Episode ${rawEpisode}`,
-    thumbnail: item?.chapterImg || item?.thumbnail || item?.image || item?.poster || "",
+    title:
+      item?.chapterName || item?.title || item?.name || `Episode ${rawEpisode}`,
+    thumbnail:
+      item?.chapterImg || item?.thumbnail || item?.image || item?.poster || "",
     duration: item?.duration || item?.runtime || "",
     streamUrl: defaultVideo?.videoPath || "",
     sources: uniqueSources,

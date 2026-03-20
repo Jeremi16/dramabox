@@ -1,5 +1,9 @@
 {
   "rewrites": [
+    {
+      "source": "/api/melolo/(.*)",
+      "destination": "https://melolo-api-azure.vercel.app/api/melolo/$1"
+    },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

@@ -8,12 +8,9 @@ export const API_CONFIG = {
     token: "",
   },
   melolo: {
-    // Saat development, gunakan proxy Vite untuk bypass CORS
-    // Saat production, gunakan URL langsung
-    baseUrl: isDev
-      ? "/melolo-api"
-      : import.meta.env.VITE_MELOLO_API_BASE_URL ||
-        "https://melolo-api-azure.vercel.app",
+    // Saat development: gunakan proxy Vite untuk bypass CORS
+    // Saat production: gunakan proxy Vercel (relative path)
+    baseUrl: isDev ? "/melolo-api" : "/api/melolo",
     token: "",
   },
 };

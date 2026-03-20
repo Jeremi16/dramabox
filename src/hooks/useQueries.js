@@ -1,22 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
-import { 
-  fetchCatalog, 
-  searchCatalog, 
-  fetchSeriesDetail, 
-  fetchEpisodes 
+import {
+  fetchCatalog,
+  fetchCatalogCombined,
+  searchCatalog,
+  searchCatalogCombined,
+  fetchSeriesDetail,
+  fetchEpisodes,
 } from "../lib/apiClient";
 
 export function useCatalog(kind, page = 1) {
   return useQuery({
     queryKey: ["catalog", kind, page],
-    queryFn: () => fetchCatalog(kind, page),
+    queryFn: () => fetchCatalogCombined(kind, page),
   });
 }
 
 export function useSearch(query) {
   return useQuery({
     queryKey: ["search", query],
-    queryFn: () => searchCatalog(query),
+    queryFn: () => searchCatalogCombined(query),
     enabled: query.length > 0,
   });
 }

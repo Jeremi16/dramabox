@@ -89,7 +89,7 @@ export function findStringUrl(payload) {
   return "";
 }
 
-export function normalizeSeries(item, index) {
+export function normalizeSeries(item, index, sourceOverride) {
   const title =
     item?.bookName ||
     item?.name ||
@@ -119,9 +119,12 @@ export function normalizeSeries(item, index) {
             ? item.genre.split(",")
             : [];
 
+  // Gunakan sourceOverride jika tersedia, jika tidak gunakan deteksi dari ID
+  const source = sourceOverride || detectSource(id);
+
   return {
     id: String(id),
-    source: detectSource(id),
+    source,
     title,
     synopsis:
       item?.introduction ||

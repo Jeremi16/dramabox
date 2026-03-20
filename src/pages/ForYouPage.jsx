@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { fetchCatalog } from "../lib/apiClient";
+import { fetchCatalogCombined } from "../lib/apiClient";
 import { GridSkeleton } from "../components/skeletons/Skeleton";
 import { ContinueWatching } from "../components/ContinueWatching";
 import CatalogPage from "../components/CatalogPage";
@@ -15,7 +15,7 @@ function ForYouPage() {
     isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ["catalog", "foryou", "infinite"],
-    queryFn: ({ pageParam = 1 }) => fetchCatalog("foryou", pageParam),
+    queryFn: ({ pageParam = 1 }) => fetchCatalogCombined("foryou", pageParam),
     getNextPageParam: (lastPage, pages) => {
       // Jika halaman terakhir memiliki data, lanjut ke halaman berikutnya
       return lastPage.length > 0 ? pages.length + 1 : undefined;

@@ -1,16 +1,67 @@
-import { useState } from "react";
-import { useCatalog } from "../hooks/useQueries";
+import { useEffect, useRef, useCallback } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchCatalogCombined } from "../lib/apiClient";
 import { GridSkeleton } from "../components/skeletons/Skeleton";
 import CatalogPage from "../components/CatalogPage";
 
 function RankPage() {
-  const [page, setPage] = useState(1);
-  const { data: items = [], isLoading, error } = useCatalog("rank", page);
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["catalog", "rank", "infinite"],
+    queryFn: ({ pageParam = 1 }) => fetchCatalogCombined("rank", pageParam),
+    getNextPageParam: (lastPage, pages) => {
+      // Jika halaman terakhir memiliki data, lanjut ke halaman berikutnya
+      return lastPage.length > 0 ? pages.length + 1 : undefined;
+    },
+  });
+
+  // Flatten semua pages menjadi satu array
+  const items = data?.pages?.flat() ?? [];
+
+  // Ref untuk observer
+  const observerRef = useRef(null);
+  const loadMoreRef = useRef(null);
+
+  // Setup Intersection Observer
+  const handleObserver = useCallback(
+    (entries) => {
+      const [target] = entries;
+      if (target.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
+
+  useEffect(() => {
+    const element = loadMoreRef.current;
+    if (!element) return;
+
+    observerRef.current = new IntersectionObserver(handleObserver, {
+      root: null,
+      rootMargin: "100px",
+      threshold: 0.1,
+    });
+
+    observerRef.current.observe(element);
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [handleObserver]);
 
   if (error) {
     // Handle different error formats
     let errorMessage = "Terjadi kesalahan saat memuat data";
-    
+
     if (typeof error === "string") {
       errorMessage = error;
     } else if (error?.message && typeof error.message === "string") {
@@ -21,39 +72,49 @@ function RankPage() {
       errorMessage = error.data.message;
     }
     return (
-      <div style={{ 
-        display: "flex", 
-        alignItems: "center", 
-        justifyContent: "center", 
-        minHeight: "400px",
-        padding: "24px"
-      }}>
-        <div style={{ 
-          maxWidth: "400px", 
-          textAlign: "center"
-        }}>
-          <div style={{
-            fontSize: "48px",
-            marginBottom: "16px"
-          }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "400px",
+          padding: "24px",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "400px",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "48px",
+              marginBottom: "16px",
+            }}
+          >
             😕
           </div>
-          <h2 style={{
-            margin: "0 0 8px 0",
-            fontSize: "18px",
-            fontWeight: "700",
-            color: "var(--text-primary)"
-          }}>
+          <h2
+            style={{
+              margin: "0 0 8px 0",
+              fontSize: "18px",
+              fontWeight: "700",
+              color: "var(--text-primary)",
+            }}
+          >
             Gagal memuat data
           </h2>
-          <p style={{
-            margin: "0 0 20px 0",
-            color: "var(--text-secondary)",
-            fontSize: "14px"
-          }}>
+          <p
+            style={{
+              margin: "0 0 20px 0",
+              color: "var(--text-secondary)",
+              fontSize: "14px",
+            }}
+          >
             {errorMessage}
           </p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
             style={{
               padding: "10px 20px",
@@ -64,7 +125,7 @@ function RankPage() {
               fontWeight: "600",
               fontSize: "14px",
               cursor: "pointer",
-              fontFamily: "inherit"
+              fontFamily: "inherit",
             }}
           >
             Coba Lagi
@@ -77,24 +138,70 @@ function RankPage() {
   if (isLoading) {
     return (
       <div>
-        <h1 style={{ padding: "1rem" }}>Rank - Halaman {page}</h1>
+        <h1
+          style={{
+            padding: "0 0 16px 0",
+            margin: "0 0 24px 0",
+            fontSize: "20px",
+            fontWeight: "700",
+            color: "var(--text-primary)",
+            borderBottom: "1px solid var(--border-light)",
+          }}
+        >
+          Trending
+        </h1>
         <GridSkeleton count={12} />
       </div>
     );
   }
 
   return (
-    <CatalogPage
-      title={`Rank - Halaman ${page}`}
-      items={items}
-      controls={
-        <div className="page-controls">
-          <button onClick={() => setPage((value) => Math.max(1, value - 1))}>Prev</button>
-          <span>Hal. {page}</span>
-          <button onClick={() => setPage((value) => value + 1)}>Next</button>
-        </div>
-      }
-    />
+    <>
+      <CatalogPage title="Trending" items={items} />
+      {/* Load More Observer */}
+      <div
+        ref={loadMoreRef}
+        style={{
+          padding: "24px",
+          textAlign: "center",
+          minHeight: "60px",
+        }}
+      >
+        {isFetchingNextPage && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "var(--text-secondary)",
+              fontSize: "14px",
+            }}
+          >
+            <span
+              style={{
+                width: "16px",
+                height: "16px",
+                border: "2px solid var(--border-light)",
+                borderTopColor: "var(--accent)",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            Memuat lebih banyak...
+          </div>
+        )}
+        {!hasNextPage && items.length > 0 && (
+          <span
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: "14px",
+            }}
+          >
+            Tidak ada data lagi
+          </span>
+        )}
+      </div>
+    </>
   );
 }
 
